@@ -1,6 +1,41 @@
 from rest_framework import serializers
 
-from .models import BorrowRecord, License
+from .models import BorrowRecord, License, LicenseAttachment
+
+
+class LicenseAttachmentSerializer(serializers.ModelSerializer):
+    file_url = serializers.SerializerMethodField()
+    file_size = serializers.IntegerField(read_only=True)
+    file_extension = serializers.CharField(read_only=True)
+    is_archived = serializers.SerializerMethodField()
+
+    class Meta:
+        model = LicenseAttachment
+        fields = [
+            "id",
+            "license",
+            "file",
+            "file_url",
+            "file_name",
+            "version",
+            "is_current",
+            "uploaded_by",
+            "description",
+            "file_size",
+            "file_extension",
+            "is_archived",
+            "created_at",
+        ]
+        read_only_fields = ["license", "version", "file_name", "file_url", "file_size", "file_extension", "is_archived", "created_at"]
+
+    def get_file_url(self, obj):
+        request = self.context.get("request")
+        if request and obj.file:
+            return request.build_absolute_uri(obj.file.url)
+        return obj.file.url if obj.file else None
+
+    def get_is_archived(self, obj):
+        return obj.license.status == License.Status.ARCHIVED
 
 
 class LicenseSerializer(serializers.ModelSerializer):
@@ -8,6 +43,8 @@ class LicenseSerializer(serializers.ModelSerializer):
     computed_status = serializers.CharField(read_only=True)
     license_type_display = serializers.CharField(source="get_license_type_display", read_only=True)
     status_display = serializers.CharField(source="get_status_display", read_only=True)
+    attachments = LicenseAttachmentSerializer(many=True, read_only=True)
+    current_attachment = serializers.SerializerMethodField()
 
     class Meta:
         model = License
@@ -28,9 +65,17 @@ class LicenseSerializer(serializers.ModelSerializer):
             "computed_status",
             "days_until_expiry",
             "notes",
+            "attachments",
+            "current_attachment",
             "created_at",
             "updated_at",
         ]
+
+    def get_current_attachment(self, obj):
+        current = obj.attachments.filter(is_current=True).first()
+        if current:
+            return LicenseAttachmentSerializer(current, context=self.context).data
+        return None
 
 
 class BorrowRecordSerializer(serializers.ModelSerializer):

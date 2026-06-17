@@ -1,5 +1,12 @@
+import os
+
 from django.db import models
 from django.utils import timezone
+
+
+def attachment_upload_path(instance, filename):
+    ext = os.path.splitext(filename)[1]
+    return f"license_attachments/license_{instance.license_id}/v{instance.version}{ext}"
 
 
 class License(models.Model):
@@ -83,3 +90,34 @@ class BorrowRecord(models.Model):
         if self.expected_return_date < timezone.localdate():
             return self.Status.OVERDUE
         return self.Status.BORROWED
+
+
+class LicenseAttachment(models.Model):
+    license = models.ForeignKey(License, on_delete=models.CASCADE, related_name="attachments", verbose_name="证照")
+    file = models.FileField("扫描件", upload_to=attachment_upload_path)
+    file_name = models.CharField("原始文件名", max_length=255)
+    version = models.PositiveIntegerField("版本号", default=1)
+    is_current = models.BooleanField("当前有效版本", default=False)
+    uploaded_by = models.CharField("上传人", max_length=60, blank=True, default="系统")
+    description = models.CharField("版本说明", max_length=255, blank=True)
+    created_at = models.DateTimeField("上传时间", auto_now_add=True)
+
+    class Meta:
+        ordering = ["-version", "-created_at"]
+        unique_together = [["license", "version"]]
+        verbose_name = "证照附件"
+        verbose_name_plural = "证照附件"
+
+    def __str__(self):
+        return f"{self.license.name} - v{self.version}"
+
+    @property
+    def file_size(self):
+        try:
+            return self.file.size
+        except Exception:
+            return 0
+
+    @property
+    def file_extension(self):
+        return os.path.splitext(self.file_name)[1].lower()

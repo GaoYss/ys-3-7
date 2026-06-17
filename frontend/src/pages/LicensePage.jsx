@@ -1,5 +1,5 @@
-import { Plus, RefreshCw, Save } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { Archive, CheckCircle2, ChevronLeft, Download, FileText, Plus, RefreshCw, Save, Star, Trash2, Upload } from 'lucide-react'
+import { useMemo, useRef, useState } from 'react'
 
 import { api } from '../api/client.js'
 import { licenseStatuses, licenseTypes } from '../api/options.js'
@@ -20,10 +20,35 @@ const initialForm = {
   notes: '',
 }
 
+const formatFileSize = (bytes) => {
+  if (!bytes) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  const i = Math.floor(Math.log(bytes) / Math.log(1024))
+  return `${(bytes / Math.pow(1024, i)).toFixed(2)} ${units[i]}`
+}
+
+const formatDate = (iso) => {
+  if (!iso) return '-'
+  return new Date(iso).toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
 export function LicensePage({ licenses, reload, notify }) {
   const [form, setForm] = useState(initialForm)
   const [filters, setFilters] = useState({ search: '', status: '' })
   const [saving, setSaving] = useState(false)
+  const [selectedLicense, setSelectedLicense] = useState(null)
+  const [uploading, setUploading] = useState(false)
+  const [uploadDesc, setUploadDesc] = useState('')
+  const [uploadedBy, setUploadedBy] = useState('')
+  const fileInputRef = useRef(null)
+
+  const isArchived = selectedLicense?.status === 'archived'
 
   const filteredLicenses = useMemo(
     () =>
@@ -55,6 +80,91 @@ export function LicensePage({ licenses, reload, notify }) {
       notify(error.message)
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleLicenseClick = async (license) => {
+    try {
+      const detail = await api.getLicense(license.id)
+      setSelectedLicense(detail.results || detail)
+    } catch (error) {
+      notify(error.message)
+    }
+  }
+
+  const closeDetail = () => {
+    setSelectedLicense(null)
+    setUploadDesc('')
+    setUploadedBy('')
+  }
+
+  const handleFileSelect = () => {
+    if (isArchived) {
+      notify('归档证照无法上传附件')
+      return
+    }
+    fileInputRef.current?.click()
+  }
+
+  const handleFileUpload = async (event) => {
+    const file = event.target.files?.[0]
+    if (!file || !selectedLicense) return
+
+    setUploading(true)
+    try {
+      const formData = new FormData()
+      formData.append('license', selectedLicense.id)
+      formData.append('file', file)
+      formData.append('file_name', file.name)
+      if (uploadDesc.trim()) formData.append('description', uploadDesc.trim())
+      if (uploadedBy.trim()) formData.append('uploaded_by', uploadedBy.trim())
+      formData.append('set_current', 'true')
+
+      await api.uploadAttachment(formData)
+      setUploadDesc('')
+      setUploadedBy('')
+      notify('附件上传成功')
+      const detail = await api.getLicense(selectedLicense.id)
+      setSelectedLicense(detail.results || detail)
+      await reload()
+    } catch (error) {
+      notify(error.message)
+    } finally {
+      setUploading(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  const handleSetCurrent = async (attachment) => {
+    if (isArchived) {
+      notify('归档证照无法修改附件')
+      return
+    }
+    try {
+      await api.setAttachmentCurrent(attachment.id)
+      notify('已标记为当前有效版本')
+      const detail = await api.getLicense(selectedLicense.id)
+      setSelectedLicense(detail.results || detail)
+      await reload()
+    } catch (error) {
+      notify(error.message)
+    }
+  }
+
+  const handleDeleteAttachment = async (attachment) => {
+    if (isArchived) {
+      notify('归档证照无法删除附件')
+      return
+    }
+    if (!confirm(`确定要删除版本 v${attachment.version} 的附件吗？`)) return
+    try {
+      await api.deleteAttachment(attachment.id)
+      notify('附件已删除')
+      const detail = await api.getLicense(selectedLicense.id)
+      setSelectedLicense(detail.results || detail)
+      await reload()
+    } catch (error) {
+      notify(error.message)
     }
   }
 
@@ -117,9 +227,14 @@ export function LicensePage({ licenses, reload, notify }) {
                 <span>部门</span>
                 <span>到期</span>
                 <span>状态</span>
+                <span>附件</span>
               </div>
               {filteredLicenses.map((item) => (
-                <div className="table-row license-row" key={item.id}>
+                <div
+                  className={`table-row license-row clickable ${selectedLicense?.id === item.id ? 'selected' : ''}`}
+                  key={item.id}
+                  onClick={() => handleLicenseClick(item)}
+                >
                   <div>
                     <strong>{item.name}</strong>
                     <span>{item.license_no}</span>
@@ -127,6 +242,10 @@ export function LicensePage({ licenses, reload, notify }) {
                   <span>{item.owner_department}</span>
                   <span>{item.expiry_date}</span>
                   <StatusBadge status={item.computed_status} />
+                  <span className="attachment-count">
+                    <FileText size={14} />
+                    {(item.attachments || []).length} 份
+                  </span>
                 </div>
               ))}
             </div>
@@ -135,15 +254,142 @@ export function LicensePage({ licenses, reload, notify }) {
           )}
         </div>
       </div>
+
+      {selectedLicense && (
+        <div className="detail-overlay" onClick={closeDetail}>
+          <div className="detail-panel" onClick={(e) => e.stopPropagation()}>
+            <div className="detail-header">
+              <button className="icon-button" type="button" onClick={closeDetail} title="关闭">
+                <ChevronLeft size={18} />
+              </button>
+              <div className="detail-title">
+                <h2>{selectedLicense.name}</h2>
+                <span className="license-no">{selectedLicense.license_no}</span>
+              </div>
+              <div className="detail-status">
+                {isArchived && (
+                  <span className="archived-tag">
+                    <Archive size={14} /> 已归档
+                  </span>
+                )}
+                <StatusBadge status={selectedLicense.computed_status} />
+              </div>
+            </div>
+
+            <div className="detail-body">
+              <section className="detail-section">
+                <h3>证照信息</h3>
+                <div className="info-grid">
+                  <InfoItem label="证照类型" value={selectedLicense.license_type_display} />
+                  <InfoItem label="发证机关" value={selectedLicense.issuing_authority} />
+                  <InfoItem label="归属部门" value={selectedLicense.owner_department} />
+                  <InfoItem label="保管人" value={selectedLicense.keeper || '-'} />
+                  <InfoItem label="发证日期" value={selectedLicense.issue_date} />
+                  <InfoItem label="到期日期" value={selectedLicense.expiry_date} />
+                  <InfoItem label="提前提醒" value={`${selectedLicense.reminder_days} 天`} />
+                  <InfoItem label="剩余天数" value={`${selectedLicense.days_until_expiry} 天`} />
+                </div>
+                {selectedLicense.notes && (
+                  <div className="notes-block">
+                    <strong>备注：</strong>
+                    <p>{selectedLicense.notes}</p>
+                  </div>
+                )}
+              </section>
+
+              <section className="detail-section">
+                <div className="section-header">
+                  <h3>
+                    <FileText size={16} />
+                    证照附件管理
+                  </h3>
+                  {isArchived && <span className="readonly-tip">归档证照 - 只读模式</span>}
+                </div>
+
+                {!isArchived && (
+                  <div className="upload-area">
+                    <div className="upload-form">
+                      <Field label="版本说明" value={uploadDesc} onChange={setUploadDesc} placeholder="如：2024年度年检更新" />
+                      <Field label="上传人" value={uploadedBy} onChange={setUploadedBy} placeholder="请输入上传人姓名" />
+                    </div>
+                    <button className="primary-button upload-btn" type="button" onClick={handleFileSelect} disabled={uploading}>
+                      <Upload size={17} />
+                      <span>{uploading ? '上传中...' : '上传扫描件'}</span>
+                    </button>
+                    <input ref={fileInputRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.bmp,.tiff,.doc,.docx" style={{ display: 'none' }} onChange={handleFileUpload} />
+                    <p className="upload-hint">支持 PDF、JPG、PNG、Word 等格式，单个文件不超过 50MB</p>
+                  </div>
+                )}
+
+                <div className="attachments-list">
+                  {(selectedLicense.attachments || []).length ? (
+                    (selectedLicense.attachments || []).map((att) => (
+                      <div key={att.id} className={`attachment-item ${att.is_current ? 'current' : ''} ${isArchived ? 'readonly' : ''}`}>
+                        <div className="attachment-icon">
+                          <FileText size={24} />
+                        </div>
+                        <div className="attachment-info">
+                          <div className="attachment-head">
+                            <span className="attachment-version">v{att.version}</span>
+                            {att.is_current && (
+                              <span className="current-badge">
+                                <Star size={12} fill="currentColor" /> 当前有效
+                              </span>
+                            )}
+                            <span className="attachment-filename" title={att.file_name}>{att.file_name}</span>
+                          </div>
+                          <div className="attachment-meta">
+                            <span>{formatFileSize(att.file_size)}</span>
+                            <span>·</span>
+                            <span>{formatDate(att.created_at)}</span>
+                            <span>·</span>
+                            <span>上传人：{att.uploaded_by || '系统'}</span>
+                          </div>
+                          {att.description && (
+                            <div className="attachment-desc">
+                              <span>版本说明：</span>{att.description}
+                            </div>
+                          )}
+                        </div>
+                        <div className="attachment-actions">
+                          <a className="icon-button" href={att.file_url} target="_blank" rel="noopener noreferrer" title="查看/下载">
+                            <Download size={16} />
+                          </a>
+                          {!isArchived && !att.is_current && (
+                            <button className="icon-button primary" type="button" onClick={() => handleSetCurrent(att)} title="设为当前有效">
+                              <CheckCircle2 size={16} />
+                            </button>
+                          )}
+                          {!isArchived && (
+                            <button className="icon-button danger" type="button" onClick={() => handleDeleteAttachment(att)} title="删除">
+                              <Trash2 size={16} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <EmptyState
+                      title="暂无附件"
+                      description={isArchived ? '该证照暂无扫描件附件。' : '请上传证照扫描件作为附件存档。'}
+                      compact
+                    />
+                  )}
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   )
 }
 
-function Field({ label, value, onChange, type = 'text', required = false }) {
+function Field({ label, value, onChange, type = 'text', required = false, placeholder = '' }) {
   return (
     <label className="field">
       <span>{label}</span>
-      <input type={type} value={value} onChange={(event) => onChange(event.target.value)} required={required} />
+      <input type={type} value={value} onChange={(event) => onChange(event.target.value)} required={required} placeholder={placeholder} />
     </label>
   )
 }
@@ -160,5 +406,14 @@ function SelectField({ label, value, options, onChange }) {
         ))}
       </select>
     </label>
+  )
+}
+
+function InfoItem({ label, value }) {
+  return (
+    <div className="info-item">
+      <span className="info-label">{label}</span>
+      <span className="info-value">{value}</span>
+    </div>
   )
 }
