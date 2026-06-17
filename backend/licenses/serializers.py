@@ -43,8 +43,7 @@ class LicenseSerializer(serializers.ModelSerializer):
     computed_status = serializers.CharField(read_only=True)
     license_type_display = serializers.CharField(source="get_license_type_display", read_only=True)
     status_display = serializers.CharField(source="get_status_display", read_only=True)
-    attachments = LicenseAttachmentSerializer(many=True, read_only=True)
-    current_attachment = serializers.SerializerMethodField()
+    attachment_count = serializers.IntegerField(read_only=True, default=0)
 
     class Meta:
         model = License
@@ -65,11 +64,18 @@ class LicenseSerializer(serializers.ModelSerializer):
             "computed_status",
             "days_until_expiry",
             "notes",
-            "attachments",
-            "current_attachment",
+            "attachment_count",
             "created_at",
             "updated_at",
         ]
+
+
+class LicenseDetailSerializer(LicenseSerializer):
+    attachments = LicenseAttachmentSerializer(many=True, read_only=True)
+    current_attachment = serializers.SerializerMethodField()
+
+    class Meta(LicenseSerializer.Meta):
+        fields = LicenseSerializer.Meta.fields + ["attachments", "current_attachment"]
 
     def get_current_attachment(self, obj):
         current = obj.attachments.filter(is_current=True).first()

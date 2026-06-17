@@ -1,23 +1,46 @@
+import os
+
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Count, Q
 from rest_framework import parsers, status, viewsets
 from rest_framework.decorators import action, api_view
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 
 from .models import BorrowRecord, License, LicenseAttachment
-from .serializers import BorrowRecordSerializer, LicenseAttachmentSerializer, LicenseSerializer
+from .serializers import BorrowRecordSerializer, LicenseAttachmentSerializer, LicenseSerializer, LicenseDetailSerializer
 from .services import dashboard_stats, refresh_borrow_status, refresh_license_status
+
+ALLOWED_ATTACHMENT_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".doc", ".docx"}
+ALLOWED_ATTACHMENT_MIMES = {
+    "application/pdf",
+    "image/jpeg",
+    "image/png",
+    "image/bmp",
+    "image/tiff",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
 
 
 class LicenseViewSet(viewsets.ModelViewSet):
     serializer_class = LicenseSerializer
+
+    def get_serializer_class(self):
+        if self.action in ("retrieve",):
+            return LicenseDetailSerializer
+        return LicenseSerializer
 
     def get_queryset(self):
         queryset = License.objects.all()
         search = self.request.query_params.get("search")
         status = self.request.query_params.get("status")
         license_type = self.request.query_params.get("type")
+
+        if self.action in ("list",):
+            queryset = queryset.annotate(attachment_count=Count("attachments"))
+        elif self.action in ("retrieve",):
+            queryset = queryset.prefetch_related("attachments")
 
         if search:
             queryset = queryset.filter(
@@ -78,6 +101,22 @@ class LicenseAttachmentViewSet(viewsets.ModelViewSet):
         if license_obj.status == License.Status.ARCHIVED:
             raise PermissionDenied("归档证照的附件为只读，无法进行修改操作。")
 
+    def _validate_file_type(self, uploaded_file, file_name):
+        ext = os.path.splitext(file_name)[1].lower()
+        if ext not in ALLOWED_ATTACHMENT_EXTENSIONS:
+            raise ValidationError(
+                {
+                    "file": f"不支持的文件格式「{ext}」，仅支持：{ ', '.join(sorted(ALLOWED_ATTACHMENT_EXTENSIONS)) }"
+                }
+            )
+        content_type = getattr(uploaded_file, "content_type", "")
+        if content_type and content_type not in ALLOWED_ATTACHMENT_MIMES:
+            raise ValidationError(
+                {
+                    "file": f"文件类型「{content_type}」不在允许的 MIME 类型列表中，请上传合法的证照扫描件。"
+                }
+            )
+
     def create(self, request, *args, **kwargs):
         license_id = request.data.get("license")
         if not license_id:
@@ -89,15 +128,16 @@ class LicenseAttachmentViewSet(viewsets.ModelViewSet):
 
         self._check_archived(license_obj)
 
+        uploaded_file = request.data.get("file")
+        if not uploaded_file:
+            raise ValidationError({"file": "请选择要上传的扫描件文件"})
+
+        file_name = request.data.get("file_name") or getattr(uploaded_file, "name", "attachment")
+        self._validate_file_type(uploaded_file, file_name)
+
         with transaction.atomic():
             last_attachment = LicenseAttachment.objects.filter(license=license_obj).order_by("-version").first()
             next_version = (last_attachment.version + 1) if last_attachment else 1
-
-            uploaded_file = request.data.get("file")
-            if not uploaded_file:
-                raise ValidationError({"file": "请选择要上传的扫描件文件"})
-
-            file_name = request.data.get("file_name") or getattr(uploaded_file, "name", "attachment")
 
             serializer = self.get_serializer(data=request.data)
             serializer.is_valid(raise_exception=True)

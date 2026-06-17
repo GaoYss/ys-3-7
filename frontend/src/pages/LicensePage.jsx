@@ -20,6 +20,9 @@ const initialForm = {
   notes: '',
 }
 
+const ALLOWED_EXTENSIONS = ['.pdf', '.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif', '.doc', '.docx']
+const MAX_FILE_SIZE = 50 * 1024 * 1024
+
 const formatFileSize = (bytes) => {
   if (!bytes) return '0 B'
   const units = ['B', 'KB', 'MB', 'GB']
@@ -109,6 +112,20 @@ export function LicensePage({ licenses, reload, notify }) {
   const handleFileUpload = async (event) => {
     const file = event.target.files?.[0]
     if (!file || !selectedLicense) return
+
+    const ext = file.name.slice(((file.name.lastIndexOf('.') - 1) >>> 0) + 2).toLowerCase()
+    const fileExt = ext ? `.${ext}` : ''
+    if (!ALLOWED_EXTENSIONS.includes(fileExt)) {
+      notify(`不支持的文件格式「${fileExt || '未知'}」，仅支持：${ALLOWED_EXTENSIONS.join('、')}`)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+      return
+    }
+
+    if (file.size > MAX_FILE_SIZE) {
+      notify(`文件大小（${formatFileSize(file.size)}）超过上限 50MB，请压缩后再上传。`)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+      return
+    }
 
     setUploading(true)
     try {
@@ -244,7 +261,7 @@ export function LicensePage({ licenses, reload, notify }) {
                   <StatusBadge status={item.computed_status} />
                   <span className="attachment-count">
                     <FileText size={14} />
-                    {(item.attachments || []).length} 份
+                    {item.attachment_count ?? 0} 份
                   </span>
                 </div>
               ))}
