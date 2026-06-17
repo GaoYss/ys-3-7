@@ -12,15 +12,6 @@ from .serializers import BorrowRecordSerializer, LicenseAttachmentSerializer, Li
 from .services import dashboard_stats, refresh_borrow_status, refresh_license_status
 
 ALLOWED_ATTACHMENT_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".doc", ".docx"}
-ALLOWED_ATTACHMENT_MIMES = {
-    "application/pdf",
-    "image/jpeg",
-    "image/png",
-    "image/bmp",
-    "image/tiff",
-    "application/msword",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-}
 
 
 class LicenseViewSet(viewsets.ModelViewSet):
@@ -37,9 +28,9 @@ class LicenseViewSet(viewsets.ModelViewSet):
         status = self.request.query_params.get("status")
         license_type = self.request.query_params.get("type")
 
-        if self.action in ("list",):
+        if self.action in ("list", "retrieve"):
             queryset = queryset.annotate(attachment_count=Count("attachments"))
-        elif self.action in ("retrieve",):
+        if self.action in ("retrieve",):
             queryset = queryset.prefetch_related("attachments")
 
         if search:
@@ -107,13 +98,6 @@ class LicenseAttachmentViewSet(viewsets.ModelViewSet):
             raise ValidationError(
                 {
                     "file": f"不支持的文件格式「{ext}」，仅支持：{ ', '.join(sorted(ALLOWED_ATTACHMENT_EXTENSIONS)) }"
-                }
-            )
-        content_type = getattr(uploaded_file, "content_type", "")
-        if content_type and content_type not in ALLOWED_ATTACHMENT_MIMES:
-            raise ValidationError(
-                {
-                    "file": f"文件类型「{content_type}」不在允许的 MIME 类型列表中，请上传合法的证照扫描件。"
                 }
             )
 

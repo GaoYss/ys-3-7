@@ -43,7 +43,7 @@ class LicenseSerializer(serializers.ModelSerializer):
     computed_status = serializers.CharField(read_only=True)
     license_type_display = serializers.CharField(source="get_license_type_display", read_only=True)
     status_display = serializers.CharField(source="get_status_display", read_only=True)
-    attachment_count = serializers.IntegerField(read_only=True, default=0)
+    attachment_count = serializers.SerializerMethodField()
 
     class Meta:
         model = License
@@ -68,6 +68,15 @@ class LicenseSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+
+    def get_attachment_count(self, obj):
+        annotated = getattr(obj, "attachment_count", None)
+        if annotated is not None:
+            return int(annotated)
+        try:
+            return obj.attachments.count()
+        except Exception:
+            return len(obj.attachments.all()) if hasattr(obj, "attachments") else 0
 
 
 class LicenseDetailSerializer(LicenseSerializer):
