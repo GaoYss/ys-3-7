@@ -53,6 +53,28 @@ export function LicensePage({ licenses, reload, updateLicenseInList, notify }) {
 
   const isArchived = selectedLicense?.status === 'archived'
 
+  const syncLicenseDetail = async (prevDetail) => {
+    try {
+      const resp = await api.getLicense(selectedLicense.id)
+      const fresh = resp.results || resp
+      setSelectedLicense(fresh)
+      if (updateLicenseInList) {
+        updateLicenseInList(selectedLicense.id, {
+          attachment_count: fresh.attachment_count,
+        })
+      }
+      return fresh
+    } catch (syncError) {
+      setSelectedLicense(prevDetail)
+      if (updateLicenseInList) {
+        updateLicenseInList(selectedLicense.id, {
+          attachment_count: prevDetail.attachment_count,
+        })
+      }
+      throw syncError
+    }
+  }
+
   const filteredLicenses = useMemo(
     () =>
       licenses.filter((item) => {
@@ -128,6 +150,7 @@ export function LicensePage({ licenses, reload, updateLicenseInList, notify }) {
     }
 
     setUploading(true)
+    const prevDetail = { ...selectedLicense }
     try {
       const formData = new FormData()
       formData.append('license', selectedLicense.id)
@@ -140,16 +163,9 @@ export function LicensePage({ licenses, reload, updateLicenseInList, notify }) {
       await api.uploadAttachment(formData)
       setUploadDesc('')
       setUploadedBy('')
+      await syncLicenseDetail(prevDetail)
       notify('附件上传成功')
-      const detail = await api.getLicense(selectedLicense.id)
-      const freshDetail = detail.results || detail
-      setSelectedLicense(freshDetail)
-      if (updateLicenseInList) {
-        updateLicenseInList(selectedLicense.id, {
-          attachment_count: freshDetail.attachment_count,
-        })
-      }
-      await reload()
+      reload()
     } catch (error) {
       notify(error.message)
     } finally {
@@ -163,12 +179,12 @@ export function LicensePage({ licenses, reload, updateLicenseInList, notify }) {
       notify('归档证照无法修改附件')
       return
     }
+    const prevDetail = { ...selectedLicense }
     try {
       await api.setAttachmentCurrent(attachment.id)
+      await syncLicenseDetail(prevDetail)
       notify('已标记为当前有效版本')
-      const detail = await api.getLicense(selectedLicense.id)
-      setSelectedLicense(detail.results || detail)
-      await reload()
+      reload()
     } catch (error) {
       notify(error.message)
     }
@@ -180,18 +196,12 @@ export function LicensePage({ licenses, reload, updateLicenseInList, notify }) {
       return
     }
     if (!confirm(`确定要删除版本 v${attachment.version} 的附件吗？`)) return
+    const prevDetail = { ...selectedLicense }
     try {
       await api.deleteAttachment(attachment.id)
+      await syncLicenseDetail(prevDetail)
       notify('附件已删除')
-      const detail = await api.getLicense(selectedLicense.id)
-      const freshDetail = detail.results || detail
-      setSelectedLicense(freshDetail)
-      if (updateLicenseInList) {
-        updateLicenseInList(selectedLicense.id, {
-          attachment_count: freshDetail.attachment_count,
-        })
-      }
-      await reload()
+      reload()
     } catch (error) {
       notify(error.message)
     }
