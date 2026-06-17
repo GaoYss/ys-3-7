@@ -40,6 +40,13 @@ export default function App() {
     }
   }
 
+  const updateLicenseInList = (licenseId, patch) => {
+    setLicenses((current) => {
+      const list = Array.isArray(current) ? current : []
+      return list.map((item) => (item.id === licenseId ? { ...item, ...patch } : item))
+    })
+  }
+
   useEffect(() => {
     loadAll().catch((error) => setToast(error.message))
   }, [])
@@ -51,6 +58,7 @@ export default function App() {
       stats,
       loading,
       reload: loadAll,
+      updateLicenseInList,
       notify: setToast,
     }),
     [licenses, borrowRecords, stats, loading],

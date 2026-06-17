@@ -41,7 +41,7 @@ const formatDate = (iso) => {
   })
 }
 
-export function LicensePage({ licenses, reload, notify }) {
+export function LicensePage({ licenses, reload, updateLicenseInList, notify }) {
   const [form, setForm] = useState(initialForm)
   const [filters, setFilters] = useState({ search: '', status: '' })
   const [saving, setSaving] = useState(false)
@@ -142,7 +142,13 @@ export function LicensePage({ licenses, reload, notify }) {
       setUploadedBy('')
       notify('附件上传成功')
       const detail = await api.getLicense(selectedLicense.id)
-      setSelectedLicense(detail.results || detail)
+      const freshDetail = detail.results || detail
+      setSelectedLicense(freshDetail)
+      if (updateLicenseInList) {
+        updateLicenseInList(selectedLicense.id, {
+          attachment_count: freshDetail.attachment_count,
+        })
+      }
       await reload()
     } catch (error) {
       notify(error.message)
@@ -178,7 +184,13 @@ export function LicensePage({ licenses, reload, notify }) {
       await api.deleteAttachment(attachment.id)
       notify('附件已删除')
       const detail = await api.getLicense(selectedLicense.id)
-      setSelectedLicense(detail.results || detail)
+      const freshDetail = detail.results || detail
+      setSelectedLicense(freshDetail)
+      if (updateLicenseInList) {
+        updateLicenseInList(selectedLicense.id, {
+          attachment_count: freshDetail.attachment_count,
+        })
+      }
       await reload()
     } catch (error) {
       notify(error.message)
@@ -259,10 +271,23 @@ export function LicensePage({ licenses, reload, notify }) {
                   <span>{item.owner_department}</span>
                   <span>{item.expiry_date}</span>
                   <StatusBadge status={item.computed_status} />
-                  <span className="attachment-count">
-                    <FileText size={14} />
-                    {item.attachment_count ?? 0} 份
-                  </span>
+                  {(() => {
+                    const count = item.attachment_count ?? 0
+                    if (count === 0) {
+                      return (
+                        <span className="attachment-count zero" title="暂无扫描件附件">
+                          <FileText size={14} />
+                          无附件
+                        </span>
+                      )
+                    }
+                    return (
+                      <span className="attachment-count" title={`共 ${count} 份扫描件附件`}>
+                        <FileText size={14} />
+                        {count} 份
+                      </span>
+                    )
+                  })()}
                 </div>
               ))}
             </div>

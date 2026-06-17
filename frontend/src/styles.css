@@ -537,6 +537,11 @@ textarea:focus {
   font-size: 13px;
 }
 
+.attachment-count.zero {
+  color: #94a3b8;
+  font-style: italic;
+}
+
 .detail-overlay {
   position: fixed;
   inset: 0;
